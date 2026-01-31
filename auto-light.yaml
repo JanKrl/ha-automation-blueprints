@@ -1,0 +1,110 @@
+blueprint:
+  name: Auto-light
+  description: "Motion triggered light.Enables 'dim before off' to notify that the light will turn off soon. To be used on lights controlled by Adaptive Lighting addon."
+  domain: automation
+  input:
+    motion_sensor:
+      name: Motion sensor
+      description: Motion sensor in the area
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+              device_class: motion
+    adaptive_lights:
+      name: Adaptive light
+      description: Adaptive lighting integration that controlls selected lights
+      selector:
+        device:
+          filter:
+            - integration: adaptive_lighting
+          multiple: true
+triggers:
+  - trigger: state
+    entity_id: !input motion_sensor
+    from: null
+    to: "on"
+actions:
+  - variables:
+      switch_entities: >
+        {% set entities = [] %}
+        {% for item in adaptive_lights %}
+          {% set entity = device_entities(item)
+                  | select('match', 'switch.adaptive_lighting_')
+                  | reject('match', 'switch.adaptive_lighting_adapt_')
+                  | reject('match', 'switch.adaptive_lighting_sleep_mode_')
+                  | first %}
+            {% if entity %}
+              {% set entities = entities + [entity] %}
+            {% endif %}
+          {% endfor %}
+          {{ entities }}
+  - repeat:
+      for_each: !input adaptive_lights
+      sequence:
+        - variables:
+            switch_entity: >
+              {{ device_entities(repeat.item)
+                  | select('match', 'switch.adaptive_lighting_')
+                  | reject('match', 'switch.adaptive_lighting_adapt_')
+                  | reject('match', 'switch.adaptive_lighting_sleep_mode_')
+                  | first  }}
+        - action: adaptive_lighting.set_manual_control
+          data:
+            manual_control: false
+            entity_id: "{{ switch_entity }}"
+          enabled: true
+        - action: light.turn_on
+          data: {}
+          target:
+            entity_id: >
+              {{ state_attr(switch_entity, 'configuration')['lights'] }}
+  - alias: Wait until there is no motion from device
+    wait_for_trigger:
+      - trigger: state
+        entity_id: !input motion_sensor
+        from: "on"
+        to: "off"
+        for:
+          hours: 0
+          minutes: 0
+          seconds: 30
+    continue_on_timeout: false
+  - variables:
+      brightness: "{{ state_attr('light.swiatla_lazienka', 'brightness') / 3 }}"
+  - action: light.turn_on
+    metadata: {}
+    data:
+      brightness: "{{ brightness }}"
+      transition: 1
+    target:
+      entity_id: "light.swiatla_lazienka"
+    enabled: true
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 5
+      milliseconds: 0
+    enabled: true
+  - repeat:
+      for_each: !input adaptive_lights
+      sequence:
+        - variables:
+            switch_entity: >
+              {{ device_entities(repeat.item)
+                  | select('match', 'switch.adaptive_lighting_')
+                  | reject('match', 'switch.adaptive_lighting_adapt_')
+                  | reject('match', 'switch.adaptive_lighting_sleep_mode_')
+                  | first  }}
+        - action: light.turn_off
+          data: {}
+          target:
+            entity_id: >
+              {{ state_attr(switch_entity, 'configuration')['lights'] }}
+  # - alias: Turn off the light
+  #   action: light.turn_off
+  #   data: {}
+  #   target:
+  #     entity_id: !input target_lights
+mode: restart
+max_exceeded: silent
