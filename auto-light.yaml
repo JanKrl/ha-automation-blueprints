@@ -1,5 +1,5 @@
 blueprint:
-  name: Auto-light 3
+  name: Auto-adaptive light
   description: "Motion triggered light. Enables 'dim before off' to notify that the light will turn off soon. To be used on lights controlled by Adaptive Lighting addon. IMPORTANT! Requres Adaptive Lighting config include_config_in_attributes to be enabled."
   domain: automation
   input:
