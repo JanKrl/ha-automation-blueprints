@@ -18,8 +18,18 @@ blueprint:
       description: Adaptive lighting integration that controlls selected lights
       selector:
         device:
+          multiple: true
           filter:
             - integration: adaptive_lighting
+    time_delay_normal:
+      name: Time delay (normal)
+      description: Seconds to wait after motion stops before dimming and turning off
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: seconds
 
 triggers:
   - trigger: state
@@ -29,19 +39,35 @@ triggers:
 
 actions:
   - variables:
-      al_device: !input adaptive_lights
-      switch_entity: >
-        {{ device_entities(al_device)
-            | select('match', 'switch.adaptive_lighting_')
-            | reject('match', 'switch.adaptive_lighting_adapt_')
-            | reject('match', 'switch.adaptive_lighting_sleep_mode_')
-            | first }}
-      target_lights: "{{ state_attr(switch_entity, 'configuration')['lights'] }}"
+      adaptive_lights: !input adaptive_lights
+      switch_entities: >
+        {% set ns = namespace(entities=[]) %}
+        {% set devices = [adaptive_lights] if adaptive_lights is string else (adaptive_lights | default([])) %}
+        {% for item in devices %}
+          {% set entity = device_entities(item)
+              | select('match', 'switch.adaptive_lighting_')
+              | reject('match', 'switch.adaptive_lighting_adapt_')
+              | reject('match', 'switch.adaptive_lighting_sleep_mode_')
+              | first | default('') %}
+          {% if entity %}
+            {% set ns.entities = ns.entities + [entity] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.entities }}
+      target_lights: >
+        {% set ns = namespace(lights=[]) %}
+        {% for sw in switch_entities %}
+          {% set cfg = state_attr(sw, 'configuration') %}
+          {% if cfg and cfg.get('lights') %}
+            {% set ns.lights = ns.lights + cfg['lights'] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.lights | unique | list }}
 
   - action: adaptive_lighting.set_manual_control
     data:
       manual_control: false
-      entity_id: "{{ switch_entity }}"
+      entity_id: "{{ switch_entities }}"
     enabled: true
 
   - action: light.turn_on
@@ -55,11 +81,13 @@ actions:
         from: "on"
         to: "off"
         for:
-          seconds: 30
+          seconds: !input time_delay_normal
     continue_on_timeout: false
 
   - variables:
-      dimmed_brightness: "{{ (state_attr(switch_entity, 'brightness_pct') | float(100) / 3) | int }}"
+      dimmed_brightness: >
+        {% set first_sw = switch_entities | first | default('') %}
+        {{ (state_attr(first_sw, 'brightness_pct') | float(100) / 3) | int }}
 
   - action: light.turn_on
     data:
